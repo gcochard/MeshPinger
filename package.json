@@ -1,0 +1,22 @@
+{
+  "name": "mesh-pinger",
+  "private": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PhenixP2P/MeshPinger.git"
+  },
+  "scripts": {
+    "preinstall": "npm prune",
+    "start": "node src/meshpinger.js mesh-ping"
+  },
+  "dependencies": {
+    "lodash": "4.17.2",
+    "moment": "2.17.0",
+    "yargs": "6.4.0"
+  },
+  "engines": {
+    "node": "4.6.2"
+  },
+  "devDependencies": {}
+}
