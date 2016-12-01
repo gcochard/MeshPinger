@@ -21,7 +21,7 @@ const dgram = require('dgram');
 const moment = require('moment');
 
 function createLogsCallback(output) {
-    const outputStream = fs.createWriteStream(output);
+    const outputStream = fs.createWriteStream(output, {flags: 'a'});
 
     return function () {
         outputStream.write(moment.utc().toISOString());
@@ -36,6 +36,8 @@ function createLogsCallback(output) {
 
 function runUdpServerSocket(port, callback) {
     const server = dgram.createSocket('udp4');
+    const alpha = 0.01;
+    const beta = 1. - alpha;
     const incoming = {};
 
     server.on('error', function (err) {
@@ -45,47 +47,60 @@ function runUdpServerSocket(port, callback) {
 
     server.on('message', function (msg, rinfo) {
         const cols = msg.toString().split('\t');
+        const now = moment.utc();
         const time = moment.utc(cols[0]);
         const hostname = cols[1];
         const count = parseInt(cols[2]);
+        const latency = now.diff(time, 'milliseconds');
 
         if (!_.has(incoming, hostname)) {
             incoming[hostname] = {
-                last: time,
-                count: count
+                lastTime: time,
+                count: count,
+                latencyEma: latency,
+                latencyEmaVar: 0.
             };
             callback('first', hostname, time.toISOString(), count);
         } else {
-            if (count < incoming[hostname].count - 1000) {
+            const record = incoming[hostname];
+
+            if (record.count > 240 && count < 120) {
                 callback('reset', hostname, time.toISOString(), count);
-                incoming[hostname] = {
-                    last: time,
-                    count: count
-                };
-            } else if (count < incoming[hostname].count) {
+                record.lastTime = time;
+                record.count = count;
+                // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
+                record.latencyEmaVar = beta * (record.latencyEmaVar + alpha * Math.pow(latency - record.latencyEma, 2));
+                record.latencyEma = beta * record.latencyEma + alpha * latency;
+            } else if (count < record.count) {
                 callback('out-of-order', hostname, time.toISOString(), count);
-            } else if (count === incoming[hostname].count) {
+            } else if (count === record.count) {
                 callback('duplicate', hostname, time.toISOString(), count);
-            } else if (count === incoming[hostname].count + 1) {
-                const delta = time.diff(incoming[hostname].last, 'milliseconds');
+            } else if (count === record.count + 1) {
+                const delta = time.diff(record.lastTime, 'milliseconds');
 
                 if (delta > 2000) {
-                    callback('delayed', hostname, time.toISOString(), count, delta, incoming[hostname].last.toISOString());
+                    callback('delayed', hostname, time.toISOString(), count, delta, record.lastTime.toISOString());
                 }
 
-                incoming[hostname] = {
-                    last: time,
-                    count: count
-                };
+                record.lastTime = time;
+                record.count = count;
+                // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
+                record.latencyEmaVar = beta * (record.latencyEmaVar + alpha * Math.pow(latency - record.latencyEma, 2));
+                record.latencyEma = beta * record.latencyEma + alpha * latency;
             } else {
-                const missing = count - incoming[hostname].count - 1;
+                const missing = count - record.count - 1;
 
-                callback('missing', hostname, time.toISOString(), count, missing, incoming[hostname].last.toISOString());
+                callback('missing', hostname, time.toISOString(), count, missing, record.lastTime.toISOString());
 
-                incoming[hostname] = {
-                    last: time,
-                    count: count
-                };
+                record.lastTime = time;
+                record.count = count;
+                // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
+                record.latencyEmaVar = beta * (record.latencyEmaVar + alpha * Math.pow(latency - record.latencyEma, 2));
+                record.latencyEma = beta * record.latencyEma + alpha * latency;
+            }
+
+            if (count % 120 === 0) {
+                callback('latency', hostname, time.toISOString(), count, record.latencyEma, record.latencyEmaVar, Math.sqrt(record.latencyEmaVar));
             }
         }
     });
@@ -122,7 +137,7 @@ function runPinger(endpoint, interval, callback) {
 
 yargs
     .usage('$0 <cmd> [args]')
-    .command('mesh-ping [port] [endpoints] [logs]', 'Ping end points', {
+    .command('mesh-ping [port] [endpoints] [log]', 'Ping end points', {
         endpoints: {
             default: 'endpoints.list'
         },
@@ -132,16 +147,16 @@ yargs
         port: {
             default: 25000
         },
-        logs: {
-            default: 'pinger.logs'
+        log: {
+            default: 'pinger.log'
         }
     }, function (argv) {
-        const logsCallback = createLogsCallback(argv.logs);
+        const logCallback = createLogsCallback(argv.log);
         const endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/[\r\n]/), function (val) { return _.trim(val); });
 
-        runUdpServerSocket(argv.port, logsCallback);
+        runUdpServerSocket(argv.port, logCallback);
 
         endpoints.forEach(function (endpoint) {
-            runPinger(endpoint, argv.interval, logsCallback);
+            runPinger(endpoint, argv.interval, logCallback);
         });
     }).help().argv;
