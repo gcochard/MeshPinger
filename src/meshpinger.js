@@ -76,9 +76,7 @@ function runUdpServerSocket(port, callback) {
             } else if (count === record.count) {
                 callback('duplicate', hostname, time.toISOString(), count);
             } else if (count === record.count + 1) {
-                const delta = time.diff(record.lastTime, 'milliseconds');
-
-                if (delta > 2000) {
+                if (latency > 2000) {
                     callback('delayed', hostname, time.toISOString(), count, delta, record.lastTime.toISOString());
                 }
 
@@ -125,11 +123,13 @@ function runPinger(endpoint, interval, callback) {
     var count = 0;
 
     setInterval(function () {
-        const msg = moment.utc().toISOString() + '\t' + hostname + '\t' + count++;
+        const pingTimestamp = moment.utc().toISOString();
+        const pingCount = count++;
+        const msg = pingTimestamp + '\t' + hostname + '\t' + pingCount;
 
         client.send(msg, 0, msg.length, port, address, function (err) {
             if (err) {
-                callback('send-failed', endpoint);
+                callback('send-failed', endpoint, pingTimestamp, pingCount);
             }
         });
     }, interval);
