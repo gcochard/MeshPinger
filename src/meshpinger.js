@@ -100,10 +100,10 @@ function runUdpServerSocket(port, epoch, callback) {
                 callback(now.toISOString(), 'latency', hostname, time.toISOString(), count,
                     record.latencyEma, record.latencyEmaVar, Math.sqrt(record.latencyEmaVar), record.latencyMin, record.latencyMax,
                     record.rttEma, record.rttEmaVar, Math.sqrt(record.rttEmaVar), record.rttMin, record.rttMax);
-                record.latencyMin = Number.MAX_SAFE_INTEGER;
-                record.latencyMax = Number.MIN_SAFE_INTEGER;
-                record.rttMin = Number.MAX_SAFE_INTEGER;
-                record.rttMax = Number.MIN_SAFE_INTEGER;
+                record.latencyMin = Number.MAX_SAFE_INTEGER || 1e12;
+                record.latencyMax = Number.MIN_SAFE_INTEGER || -1e12;
+                record.rttMin = Number.MAX_SAFE_INTEGER || 1e12;
+                record.rttMax = Number.MIN_SAFE_INTEGER || -1e12;
             }
         }
     }
@@ -119,8 +119,8 @@ function runUdpServerSocket(port, epoch, callback) {
         if (!record.rttEma) {
             record.rttEma = rtt;
             record.rttEmaVar = 0.;
-            record.rttMin = Number.MAX_SAFE_INTEGER;
-            record.rttMax = Number.MIN_SAFE_INTEGER;
+            record.rttMin = Number.MAX_SAFE_INTEGER || 1e12;
+            record.rttMax = Number.MIN_SAFE_INTEGER || -1e12;
         }
 
         // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
@@ -136,7 +136,7 @@ function runUdpServerSocket(port, epoch, callback) {
         if (cols[0] === 'ping') {
             const pong = 'pong\t' + cols[1] + '\t' + localHostname + '\t' + cols[3];
 
-            client.send(pong, 0, pong.length, port, rinfo.address, function (err) {
+            client.send(new Buffer(pong), 0, pong.length, port, rinfo.address, function (err) {
                 if (err) {
                     callback(moment.utc().toISOString(), 'send-failed', cols[2], 'pong', cols[1], cols[3]);
                 }
@@ -183,7 +183,7 @@ function runPinger(endpoint, interval, callback) {
         const pingCount = count++;
         const ping = 'ping\t' + pingTimestamp + '\t' + localHostname + '\t' + pingCount;
 
-        client.send(ping, 0, ping.length, port, address, function (err) {
+        client.send(new Buffer(ping), 0, ping.length, port, address, function (err) {
             if (err) {
                 callback(pingTimestamp, 'send-failed', endpoint, 'ping', pingTimestamp, pingCount);
             }
