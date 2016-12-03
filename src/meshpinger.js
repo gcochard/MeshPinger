@@ -19,13 +19,12 @@ const fs = require('fs');
 const os = require('os');
 const dgram = require('dgram');
 const moment = require('moment');
+const localHostname = os.hostname();
 
 function createLogsCallback(output) {
     const outputStream = fs.createWriteStream(output, {flags: 'a'});
 
     return function () {
-        outputStream.write(moment.utc().toISOString());
-        outputStream.write('\t');
         for (var i = 0; i < arguments.length; i++) {
             outputStream.write('' + arguments[i]);
             outputStream.write('\t');
@@ -34,9 +33,10 @@ function createLogsCallback(output) {
     };
 }
 
-function runUdpServerSocket(port, callback) {
+function runUdpServerSocket(port, epoch, callback) {
+    const client = dgram.createSocket('udp4');
     const server = dgram.createSocket('udp4');
-    const alpha = 0.01;
+    const alpha = 1 / epoch;
     const beta = 1. - alpha;
     const incoming = {};
 
@@ -45,69 +45,126 @@ function runUdpServerSocket(port, callback) {
         server.close();
     });
 
-    server.on('message', function (msg, rinfo) {
-        const cols = msg.toString().split('\t');
-        const now = moment.utc();
-        const time = moment.utc(cols[0]);
-        const hostname = cols[1];
-        const count = parseInt(cols[2]);
+    function handlePing(now, hostname, time, count) {
         const latency = now.diff(time, 'milliseconds');
 
-        if (!_.has(incoming, hostname)) {
+        function createRecord() {
             incoming[hostname] = {
                 lastTime: time,
                 count: count,
                 latencyEma: latency,
-                latencyEmaVar: 0.
+                latencyEmaVar: 0.,
+                latencyMin: latency,
+                latencyMax: latency
             };
-            callback('first', hostname, time.toISOString(), count);
+        }
+
+        if (!_.has(incoming, hostname)) {
+            createRecord();
+            callback(now.toISOString(), 'first', hostname, time.toISOString(), count, epoch);
         } else {
             const record = incoming[hostname];
 
-            if (record.count > 240 && count < 120) {
-                callback('reset', hostname, time.toISOString(), count);
+            function update() {
                 record.lastTime = time;
                 record.count = count;
                 // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
                 record.latencyEmaVar = beta * (record.latencyEmaVar + alpha * Math.pow(latency - record.latencyEma, 2));
                 record.latencyEma = beta * record.latencyEma + alpha * latency;
+                record.latencyMin = Math.min(latency, record.latencyMin);
+                record.latencyMax = Math.max(latency, record.latencyMax);
+            }
+
+            if (record.count > 2 * epoch && count < epoch) {
+                createRecord();
+                callback(now.toISOString(), 'reset', hostname, time.toISOString(), count, epoch);
             } else if (count < record.count) {
-                callback('out-of-order', hostname, time.toISOString(), count);
+                callback(now.toISOString(), 'out-of-order', hostname, time.toISOString(), count);
             } else if (count === record.count) {
-                callback('duplicate', hostname, time.toISOString(), count);
+                callback(now.toISOString(), 'duplicate', hostname, time.toISOString(), count);
             } else if (count === record.count + 1) {
                 if (latency > 2000) {
-                    callback('delayed', hostname, time.toISOString(), count, delta, record.lastTime.toISOString());
+                    callback(now.toISOString(), 'delayed', hostname, time.toISOString(), count, latency, record.lastTime.toISOString());
                 }
 
-                record.lastTime = time;
-                record.count = count;
-                // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
-                record.latencyEmaVar = beta * (record.latencyEmaVar + alpha * Math.pow(latency - record.latencyEma, 2));
-                record.latencyEma = beta * record.latencyEma + alpha * latency;
+                update();
             } else {
                 const missing = count - record.count - 1;
 
-                callback('missing', hostname, time.toISOString(), count, missing, record.lastTime.toISOString());
+                callback(now.toISOString(), 'missing', hostname, time.toISOString(), count, missing, record.lastTime.toISOString());
 
-                record.lastTime = time;
-                record.count = count;
-                // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
-                record.latencyEmaVar = beta * (record.latencyEmaVar + alpha * Math.pow(latency - record.latencyEma, 2));
-                record.latencyEma = beta * record.latencyEma + alpha * latency;
+                update();
             }
 
-            if (count % 120 === 0) {
-                callback('latency', hostname, time.toISOString(), count, record.latencyEma, record.latencyEmaVar, Math.sqrt(record.latencyEmaVar));
+            if (count % epoch === 0) {
+                callback(now.toISOString(), 'latency', hostname, time.toISOString(), count,
+                    record.latencyEma, record.latencyEmaVar, Math.sqrt(record.latencyEmaVar), record.latencyMin, record.latencyMax,
+                    record.rttEma, record.rttEmaVar, Math.sqrt(record.rttEmaVar), record.rttMin, record.rttMax);
+                record.latencyMin = Number.MAX_SAFE_INTEGER;
+                record.latencyMax = Number.MIN_SAFE_INTEGER;
+                record.rttMin = Number.MAX_SAFE_INTEGER;
+                record.rttMax = Number.MIN_SAFE_INTEGER;
             }
+        }
+    }
+
+    function handlePong(now, hostname, time, count) {
+        const rtt = now.diff(time, 'milliseconds');
+
+        if (!incoming[hostname]) {
+            return;
+        }
+        const record = incoming[hostname];
+
+        if (!record.rttEma) {
+            record.rttEma = rtt;
+            record.rttEmaVar = 0.;
+            record.rttMin = Number.MAX_SAFE_INTEGER;
+            record.rttMax = Number.MIN_SAFE_INTEGER;
+        }
+
+        // http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
+        record.rttEmaVar = beta * (record.rttEmaVar + alpha * Math.pow(rtt - record.rttEma, 2));
+        record.rttEma = beta * record.rttEma + alpha * rtt;
+        record.rttMin = Math.min(rtt, record.rttMin);
+        record.rttMax = Math.max(rtt, record.rttMax);
+    }
+
+    server.on('message', function (msg, rinfo) {
+        const cols = msg.toString().split('\t');
+
+        if (cols[0] === 'ping') {
+            const pong = 'pong\t' + cols[1] + '\t' + localHostname + '\t' + cols[3];
+
+            client.send(pong, 0, pong.length, port, rinfo.address, function (err) {
+                if (err) {
+                    callback(moment.utc().toISOString(), 'send-failed', cols[2], 'pong', cols[1], cols[3]);
+                }
+            });
+        }
+
+        const now = moment.utc();
+        const type = cols[0];
+        const time = moment.utc(cols[1]);
+        const hostname = cols[2];
+        const count = parseInt(cols[3]);
+
+        switch (type) {
+            case 'ping':
+                handlePing(now, hostname, time, count);
+                break;
+            case 'pong':
+                handlePong(now, hostname, time, count);
+                break;
         }
     });
 
     server.on('listening', function () {
+        const now = moment.utc();
         const address = server.address();
         console.log('Server listening %s:%d', address.address, address.port);
 
-        callback('listening', address.address, address.port);
+        callback(now.toISOString(), 'listening', address.address, address.port);
     });
 
     server.bind(port);
@@ -119,17 +176,16 @@ function runPinger(endpoint, interval, callback) {
     const address = _.get(endpoint.split(':'), '[0]', 'localhost');
     const port = parseInt(_.get(endpoint.split(':'), '[1]', 25000));
     const client = dgram.createSocket('udp4');
-    const hostname = os.hostname();
     var count = 0;
 
     setInterval(function () {
         const pingTimestamp = moment.utc().toISOString();
         const pingCount = count++;
-        const msg = pingTimestamp + '\t' + hostname + '\t' + pingCount;
+        const ping = 'ping\t' + pingTimestamp + '\t' + localHostname + '\t' + pingCount;
 
-        client.send(msg, 0, msg.length, port, address, function (err) {
+        client.send(ping, 0, ping.length, port, address, function (err) {
             if (err) {
-                callback('send-failed', endpoint, pingTimestamp, pingCount);
+                callback(pingTimestamp, 'send-failed', endpoint, 'ping', pingTimestamp, pingCount);
             }
         });
     }, interval);
@@ -144,6 +200,9 @@ yargs
         interval: {
             default: 500
         },
+        epoch: {
+            default: 120
+        },
         port: {
             default: 25000
         },
@@ -154,7 +213,7 @@ yargs
         const logCallback = createLogsCallback(argv.log);
         const endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/[\r\n]/), function (val) { return _.trim(val); });
 
-        runUdpServerSocket(argv.port, logCallback);
+        runUdpServerSocket(argv.port, argv.epoch, logCallback);
 
         endpoints.forEach(function (endpoint) {
             runPinger(endpoint, argv.interval, logCallback);

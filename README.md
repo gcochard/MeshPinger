@@ -11,13 +11,14 @@ The output is a log file that contains various events that make it easy to proce
 ## Log Events
 There is a number of events that are logged.
 
-* **first** Whenever a new incoming ping origin is added then this message is logged. Columns: event-name, hostname, ping-time, ping-count
+* **first** Whenever a new incoming ping origin is added then this message is logged. Columns: event-name, hostname, ping-time, ping-count, epoch
+* **reset** Similar to first, the
 * **delayed** This event is logged if the estimated one-way latency (based on NTP synchronized host times) is more than 2 seconds. Columns: event-name, hostname, ping-time, ping-count, estimated-one-way-latency, previous-ping-time);
 * **missing** This event is logged if a gap of packets was detected. Columns: event-name, hostname, ping-time, ping-count, number-of-missing-packets, previous-ping-time
 * **out-of-order** This event is logged if a packet is received out of order. Columns: event-name, hostname, ping-time, ping-count
 * **duplicate** This event is logged if a duplicate packet is received: Columns: event-name, hostname, ping-time, ping-count
-* **latency** This event logs the [weighted moving mean, weighted moving variance and weighted moving standard deviation](http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean) of the one-way latency estimation. Colunns: event-name, hostname, ping-time, ping-count, weighted-mean, weighted-variance, weighted-standard-deviation
-* **send-failed** This event is logged if sending of a packet failed. This can happen, for example, when the DNS resolution of the hostname fails. Columns: event-name, destination-hostname, ping-time, ping-count
+* **latency** This event logs the [weighted moving mean, weighted moving variance and weighted moving standard deviation](http://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean) of the one-way latency estimation and the [extrema](https://en.wikipedia.org/wiki/Maxima_and_minima) of the latency during the last epoch. Columns: event-name, hostname, ping-time, ping-count, latency-weighted-mean, latency-weighted-variance, latency-weighted-standard-deviation, latency-epoch-min, latency-epoch-max, rtt-weighted-mean, rtt-weighted-variance, rtt-weighted-standard-deviation, rtt-epoch-min, rtt-epoch-max
+* **send-failed** This event is logged if sending of a packet failed, e.g. ping or pong. This can happen, for example, when the DNS resolution of the hostname fails. Columns: event-name, destination-hostname, message-type, message-time, message-count
 
 
 ## Analyzing data
