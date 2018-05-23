@@ -23,12 +23,12 @@ const compute = new Compute();
 const dgram = require('dgram');
 const moment = require('moment');
 const localHostname = os.hostname();
-const projectId = compute.authClient.projectId;
+let projectId = compute.authClient.projectId;
 let port = 25000;
-
 function enumerateHosts(cb) {
     return enumerateHostsWithSDK(function(err, hosts){
         if(err){ return cb(err); }
+        projectId = compute.authClient.projectId;
         return cb(null, hosts.map( host => getDnsNameFromVm(host) ));
     });
 }
@@ -38,20 +38,16 @@ function enumerateHostsWithSDK(cb) {
         return cb(null, vms);
     });
 }
-
 function getDnsNameFromVm(vm) {
-    return `${vm.name}.${vm.zone}.c.${projectId}.internal:${port}`;
+    return `${vm.name}.${vm.zone.name}.c.${projectId}.internal:${port}`;
 }
-
 function enumerateHostsWithExec() {
     exec('gcloud compute instances list', function(err, stdout, stderr){
         
     });
 }
-
 function createLogsCallback(output) {
     const outputStream = fs.createWriteStream(output, {flags: 'a'});
-
     return function () {
         for (var i = 0; i < arguments.length; i++) {
             outputStream.write('' + arguments[i]);
@@ -236,8 +232,20 @@ yargs
         },
         log: {
             default: 'pinger.log'
+        },
+        enumerate: {
+            default: false
         }
     }, function (argv) {
+        if(argv.enumerate){
+                enumerateHosts((err,hosts) => {
+                        console.log(hosts);
+                });
+                enumerateHostsWithSDK((err,hosts) => {
+                        console.log(hosts);
+                });
+                return;
+        }
         port = argv.port;
         const logCallback = createLogsCallback(argv.log);
         let endpoints;
