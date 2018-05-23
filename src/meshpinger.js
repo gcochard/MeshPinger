@@ -240,10 +240,23 @@ yargs
     }, function (argv) {
         port = argv.port;
         const logCallback = createLogsCallback(argv.log);
-        const endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/(\r\n)+/), function (val) { return _.trim(val); });
+        let endpoints;
+        if(fs.existsSync(argv.endpoints)){
+            endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/(\r\n)+/), function (val) { return _.trim(val); });
+        }
         let pingSessions = {};
 
         runUdpServerSocket(argv.port, argv.epoch, logCallback);
+
+        function reEnumerate(){
+            enumerateHosts((err, hosts) => {
+                // swallow failures
+                if(err){ return console.error(err); }
+                endpoints = hosts;
+                startPingsOnce();
+            });
+        }
+
         function startPingsOnce() {
             endpoints.forEach(function (endpoint) {
                 if(!pingSessions[endpoint]){
@@ -252,15 +265,8 @@ yargs
             });
         }
 
-        startPingsOnce();
+        reEnumerate();
 
         // re-enumerate hosts every minute
-        setInterval(function(){
-            enumerateHosts((err, hosts) => {
-                // swallow failures
-                if(err){ return console.error(err); }
-                endpoints = hosts;
-                startPingsOnce();
-            });
-        }, 60 * 1000);
+        setInterval(reEnumerate, 60 * 1000);
     }).help().argv;
