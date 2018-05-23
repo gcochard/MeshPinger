@@ -17,9 +17,37 @@ const _ = require('lodash');
 const yargs = require('yargs');
 const fs = require('fs');
 const os = require('os');
+const exec = require('child_process').exec;
+const Compute = require('@google-cloud/compute');
+const compute = new Compute();
 const dgram = require('dgram');
 const moment = require('moment');
 const localHostname = os.hostname();
+const projectId = compute.authClient.projectId;
+let port = 25000;
+
+function enumerateHosts(cb) {
+    return enumerateHostsWithSDK(function(err, hosts){
+        if(err){ return cb(err); }
+        return cb(null, hosts.map( host => getDnsNameFromVm(host) ));
+    });
+}
+function enumerateHostsWithSDK(cb) {
+    compute.getVMs({filter: 'name eq ^mesh.*$'}, function(err, vms){
+        if(err){ return cb(err); }
+        return cb(null, vms);
+    });
+}
+
+function getDnsNameFromVm(vm) {
+    return `${vm.name}.${vm.zone}.c.${projectId}.internal:${port}`;
+}
+
+function enumerateHostsWithExec() {
+    exec('gcloud compute instances list', function(err, stdout, stderr){
+        
+    });
+}
 
 function createLogsCallback(output) {
     const outputStream = fs.createWriteStream(output, {flags: 'a'});
@@ -178,7 +206,7 @@ function runPinger(endpoint, interval, callback) {
     const client = dgram.createSocket('udp4');
     var count = 0;
 
-    setInterval(function () {
+    return setInterval(function () {
         const pingTimestamp = moment.utc().toISOString();
         const pingCount = count++;
         const ping = 'ping\t' + pingTimestamp + '\t' + localHostname + '\t' + pingCount;
@@ -210,12 +238,29 @@ yargs
             default: 'pinger.log'
         }
     }, function (argv) {
+        port = argv.port;
         const logCallback = createLogsCallback(argv.log);
-        const endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/[\r\n]/), function (val) { return _.trim(val); });
+        const endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/(\r\n)+/), function (val) { return _.trim(val); });
+        let pingSessions = {};
 
         runUdpServerSocket(argv.port, argv.epoch, logCallback);
+        function startPingsOnce() {
+            endpoints.forEach(function (endpoint) {
+                if(!pingSessions[endpoint]){
+                    pingSessions[endpoint] = runPinger(endpoint, argv.interval, logCallback);
+                }
+            });
+        }
 
-        endpoints.forEach(function (endpoint) {
-            runPinger(endpoint, argv.interval, logCallback);
-        });
+        startPingsOnce();
+
+        // re-enumerate hosts every minute
+        setInterval(function(){
+            enumerateHosts((err, hosts) => {
+                // swallow failures
+                if(err){ return console.error(err); }
+                endpoints = hosts;
+                startPingsOnce();
+            });
+        }, 60 * 1000);
     }).help().argv;
