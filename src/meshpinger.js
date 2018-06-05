@@ -202,17 +202,22 @@ function runPinger(endpoint, interval, callback) {
     const client = dgram.createSocket('udp4');
     var count = 0;
 
-    return setInterval(function () {
+    let theInterval = setInterval(function () {
         const pingTimestamp = moment.utc().toISOString();
         const pingCount = count++;
         const ping = 'ping\t' + pingTimestamp + '\t' + localHostname + '\t' + pingCount;
 
         client.send(new Buffer(ping), 0, ping.length, port, address, function (err) {
             if (err) {
+                if(endpoints.indexOf(endpoint) === -1){
+                    callback(pingTimestamp, 'host-removed', endpoint, 'ping', pingTimestamp, pingCount);
+                    return clearInterval(theInterval);
+                }
                 callback(pingTimestamp, 'send-failed', endpoint, 'ping', pingTimestamp, pingCount);
             }
         });
     }, interval);
+    return theInterval;
 }
 
 yargs
