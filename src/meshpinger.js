@@ -25,6 +25,7 @@ const moment = require('moment');
 const localHostname = os.hostname();
 let projectId = compute.authClient.projectId;
 let port = 25000;
+let endpoints = [];
 function enumerateHosts(cb) {
     return enumerateHostsWithSDK(function(err, hosts){
         if(err){ return cb(err); }
@@ -40,11 +41,6 @@ function enumerateHostsWithSDK(cb) {
 }
 function getDnsNameFromVm(vm) {
     return `${vm.name}.${vm.zone.name}.c.${projectId}.internal:${port}`;
-}
-function enumerateHostsWithExec() {
-    exec('gcloud compute instances list', function(err, stdout, stderr){
-        
-    });
 }
 function createLogsCallback(output) {
     const outputStream = fs.createWriteStream(output, {flags: 'a'});
@@ -253,7 +249,6 @@ yargs
         }
         port = argv.port;
         const logCallback = createLogsCallback(argv.log);
-        let endpoints;
         if(fs.existsSync(argv.endpoints)){
             endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/(\r\n)+/), function (val) { return _.trim(val); });
         }
