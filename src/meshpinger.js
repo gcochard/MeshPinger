@@ -23,6 +23,7 @@ const compute = new Compute();
 const dgram = require('dgram');
 const moment = require('moment');
 const localHostname = os.hostname();
+const server = require('./server.js');
 let projectId = compute.authClient.projectId;
 let port = 25000;
 let endpoints = [];
@@ -277,4 +278,5 @@ yargs
 
         // re-enumerate hosts every minute
         setInterval(reEnumerate, 60 * 1000);
+        server.mount(pingSessions);
     }).help().argv;
