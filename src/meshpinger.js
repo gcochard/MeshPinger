@@ -24,6 +24,7 @@ const dgram = require('dgram');
 const moment = require('moment');
 const localHostname = os.hostname();
 const server = require('./server.js');
+const exporter = require('./exporter.js');
 let projectId = compute.authClient.projectId;
 let port = 25000;
 let endpoints = [];
@@ -43,18 +44,57 @@ function enumerateHostsWithSDK(cb) {
 function getDnsNameFromVm(vm) {
     return `${vm.name}.${vm.zone.name}.c.${projectId}.internal:${port}`;
 }
-function createLogsCallback(output) {
-    const outputStream = fs.createWriteStream(output, {flags: 'a'});
-    return function () {
+
+function createLogsCallback(tsvOutput, jsonOutput) {
+    const outputStream = fs.createWriteStream(tsvOutput, {flags: 'a'});
+    const jsonStream = fs.createWriteStream(jsonOutput, {flags: 'a'});
+    return function (src_timestamp, event_name, remote_hostname, remote_timestamp, count, ...rest) {
         for (var i = 0; i < arguments.length; i++) {
             outputStream.write('' + arguments[i]);
             outputStream.write('\t');
         }
         outputStream.write('\n');
+        const obj = {src_timestamp, event_name, remote_hostname, remote_timestamp, count};
+        switch(recordType){
+          case 'reset':
+            obj.epoch = rest[0];
+            break;
+          case 'out-of-order':
+          case 'duplicate':
+            break;
+          case 'delayed':
+            [obj.latency, obj.last_timestamp] = rest;
+            break;
+          case 'missing':
+            [obj.missing, obj.last_timestamp] = rest;
+            break;
+          case 'latency':
+            [
+                obj.latency_weighted_mean,
+                obj.latency_weighted_variance,
+                obj.latency_weighted_standard_deviation,
+                obj.latency_epoch_min,
+                obj.latency_epoch_max,
+                obj.rtt_weighted_mean,
+                obj.rtt_weighted_variance,
+                obj.rtt_weighted_standard_deviation,
+                obj.rtt_epoch_min,
+                obj.rtt_epoch_max
+            ] = rest;
+            break;
+          case 'send-failed':
+            obj.count = rest[0];
+            obj.packetTime = count;
+            break;
+
+        }
+        jsonStream.write(JSON.stringify());
+        jsonStream.write('\n');
     };
+    exporter.mount(jsonOutput);
 }
 
-function runUdpServerSocket(port, epoch, callback) {
+function runUdpServerSocket(port, epoch, writeLog) {
     const client = dgram.createSocket('udp4');
     const server = dgram.createSocket('udp4');
     const alpha = 1 / epoch;
@@ -82,7 +122,7 @@ function runUdpServerSocket(port, epoch, callback) {
 
         if (!_.has(incoming, hostname)) {
             createRecord();
-            callback(now.toISOString(), 'first', hostname, time.toISOString(), count, epoch);
+            writeLog(now.toISOString(), 'first', hostname, time.toISOString(), count, epoch);
         } else {
             const record = incoming[hostname];
 
@@ -98,27 +138,27 @@ function runUdpServerSocket(port, epoch, callback) {
 
             if (record.count > 2 * epoch && count < epoch) {
                 createRecord();
-                callback(now.toISOString(), 'reset', hostname, time.toISOString(), count, epoch);
+                writeLog(now.toISOString(), 'reset', hostname, time.toISOString(), count, epoch);
             } else if (count < record.count) {
-                callback(now.toISOString(), 'out-of-order', hostname, time.toISOString(), count);
+                writeLog(now.toISOString(), 'out-of-order', hostname, time.toISOString(), count);
             } else if (count === record.count) {
-                callback(now.toISOString(), 'duplicate', hostname, time.toISOString(), count);
+                writeLog(now.toISOString(), 'duplicate', hostname, time.toISOString(), count);
             } else if (count === record.count + 1) {
                 if (latency > 2000) {
-                    callback(now.toISOString(), 'delayed', hostname, time.toISOString(), count, latency, record.lastTime.toISOString());
+                    writeLog(now.toISOString(), 'delayed', hostname, time.toISOString(), count, latency, record.lastTime.toISOString());
                 }
 
                 update();
             } else {
                 const missing = count - record.count - 1;
 
-                callback(now.toISOString(), 'missing', hostname, time.toISOString(), count, missing, record.lastTime.toISOString());
+                writeLog(now.toISOString(), 'missing', hostname, time.toISOString(), count, missing, record.lastTime.toISOString());
 
                 update();
             }
 
             if (count % epoch === 0) {
-                callback(now.toISOString(), 'latency', hostname, time.toISOString(), count,
+                writeLog(now.toISOString(), 'latency', hostname, time.toISOString(), count,
                     record.latencyEma, record.latencyEmaVar, Math.sqrt(record.latencyEmaVar), record.latencyMin, record.latencyMax,
                     record.rttEma, record.rttEmaVar, Math.sqrt(record.rttEmaVar), record.rttMin, record.rttMax);
                 record.latencyMin = Number.MAX_SAFE_INTEGER || 1e12;
@@ -159,7 +199,7 @@ function runUdpServerSocket(port, epoch, callback) {
 
             client.send(new Buffer(pong), 0, pong.length, port, rinfo.address, function (err) {
                 if (err) {
-                    callback(moment.utc().toISOString(), 'send-failed', cols[2], 'pong', cols[1], cols[3]);
+                    writeLog(moment.utc().toISOString(), 'send-failed', cols[2], 'pong', cols[1], cols[3]);
                 }
             });
         }
@@ -185,13 +225,13 @@ function runUdpServerSocket(port, epoch, callback) {
         const address = server.address();
         console.log('Server listening %s:%d', address.address, address.port);
 
-        callback(now.toISOString(), 'listening', address.address, address.port);
+        writeLog(now.toISOString(), 'listening', address.address, address.port);
     });
 
     server.bind(port);
 }
 
-function runPinger(endpoint, interval, callback) {
+function runPinger(endpoint, interval, writeLog) {
     console.log('Run pinger to end point %s with interval of %d ms', endpoint, interval);
 
     const address = _.get(endpoint.split(':'), '[0]', 'localhost');
@@ -207,10 +247,10 @@ function runPinger(endpoint, interval, callback) {
         client.send(new Buffer(ping), 0, ping.length, port, address, function (err) {
             if (err) {
                 if(endpoints.indexOf(endpoint) === -1){
-                    callback(pingTimestamp, 'host-removed', endpoint, 'ping', pingTimestamp, pingCount);
+                    writeLog(pingTimestamp, 'host-removed', endpoint, 'ping', pingTimestamp, pingCount);
                     return clearInterval(theInterval);
                 }
-                callback(pingTimestamp, 'send-failed', endpoint, 'ping', pingTimestamp, pingCount);
+                writeLog(pingTimestamp, 'send-failed', endpoint, 'ping', pingTimestamp, pingCount);
             }
         });
     }, interval);
@@ -235,6 +275,9 @@ yargs
         log: {
             default: 'pinger.log'
         },
+        jsonlog: {
+            default: 'pinger.json'
+        },
         enumerate: {
             default: false
         }
@@ -249,7 +292,7 @@ yargs
                 return;
         }
         port = argv.port;
-        const logCallback = createLogsCallback(argv.log);
+        const logCallback = createLogsCallback(argv.log, argv.jsonlog);
         if(fs.existsSync(argv.endpoints)){
             endpoints = _.filter(fs.readFileSync(argv.endpoints).toString().split(/(\r\n)+/), function (val) { return _.trim(val); });
         }
