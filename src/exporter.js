@@ -72,4 +72,4 @@ function mount(filename){
   });
 }
 
-module.export {mount};
+module.exports = {mount};
