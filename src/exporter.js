@@ -42,7 +42,7 @@ function commitChanges(){
   while(pending.length){
     let row = pending.shift();
     row.rev_timestamp = leftPad(reverse(new Date(row.src_timestamp).getTime()), '0', 13);
-    return getTable().insert(row, function(err, apiResponse){
+    getTable().insert(row, function(err, apiResponse){
       if(err){
         console.error(err);
         console.log(`error on inserted row: ${JSON.stringify(row)}`);
