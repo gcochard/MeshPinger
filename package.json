@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google-cloud/compute": "^0.10.0",
+    "@google-cloud/spanner": "^1.5.0",
     "lodash": "4.17.2",
     "moment": "2.17.0",
     "yargs": "6.4.0"
