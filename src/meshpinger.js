@@ -55,7 +55,14 @@ function createLogsCallback(tsvOutput, jsonOutput) {
             outputStream.write('\t');
         }
         outputStream.write('\n');
-        const obj = {src_timestamp, event_name, remote_hostname, remote_timestamp, count};
+        const obj = {
+          src_timestamp,
+          event_name,
+          remote_hostname,
+          remote_timestamp,
+          count,
+          src_hostname: localHostname
+        };
         switch(event_name){
           case 'reset':
             obj.epoch = rest[0];
@@ -80,12 +87,12 @@ function createLogsCallback(tsvOutput, jsonOutput) {
                 obj.rtt_weighted_variance,
                 obj.rtt_weighted_standard_deviation,
                 obj.rtt_epoch_min,
-                obj.rtt_epoch_max
+                obj.rtt_epoch_max,
+                obj.latency
             ] = rest;
             break;
           case 'send-failed':
             obj.count = rest[0];
-            obj.src_hostname = localHostname;
             delete obj.remote_timestamp;
             break;
           default:
@@ -162,7 +169,7 @@ function runUdpServerSocket(port, epoch, writeLog) {
             if (count % epoch === 0) {
                 writeLog(now.toISOString(), 'latency', hostname, time.toISOString(), count,
                     record.latencyEma, record.latencyEmaVar, Math.sqrt(record.latencyEmaVar), record.latencyMin, record.latencyMax,
-                    record.rttEma, record.rttEmaVar, Math.sqrt(record.rttEmaVar), record.rttMin, record.rttMax);
+                    record.rttEma, record.rttEmaVar, Math.sqrt(record.rttEmaVar), record.rttMin, record.rttMax, latency);
                 record.latencyMin = Number.MAX_SAFE_INTEGER || 1e12;
                 record.latencyMax = Number.MIN_SAFE_INTEGER || -1e12;
                 record.rttMin = Number.MAX_SAFE_INTEGER || 1e12;
@@ -324,4 +331,12 @@ yargs
         // re-enumerate hosts every minute
         setInterval(reEnumerate, 60 * 1000);
         server.mount(pingSessions);
-    }).help().argv;
+    })
+    .command('exporter [jsonlog]', 'Watch the json log and epxort it to spanner', {
+        jsonlog: {
+            default: 'pinger.json'
+        },
+    }, function(argv){
+        exporter.mount(argv.jsonlog);
+    })
+    .help().argv;
