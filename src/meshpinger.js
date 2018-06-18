@@ -46,9 +46,9 @@ function getDnsNameFromVm(vm) {
 }
 
 function createLogsCallback(tsvOutput, jsonOutput) {
+    exporter.process(jsonOutput);
     const outputStream = fs.createWriteStream(tsvOutput, {flags: 'a'});
-    const jsonStream = fs.createWriteStream(jsonOutput, {flags: 'a'});
-    exporter.mount(jsonOutput);
+    const jsonStream = fs.createWriteStream(jsonOutput, {flags: 'w'});
     return function (src_timestamp, event_name, remote_hostname, remote_timestamp, count, ...rest) {
         for (var i = 0; i < arguments.length; i++) {
             outputStream.write('' + arguments[i]);
@@ -99,6 +99,7 @@ function createLogsCallback(tsvOutput, jsonOutput) {
             // don't log unknown events
             return;
         }
+        exporter.insertRow(obj);
         jsonStream.write(JSON.stringify(obj) + '\n');
     };
 }
@@ -337,6 +338,6 @@ yargs
             default: 'pinger.json'
         },
     }, function(argv){
-        exporter.mount(argv.jsonlog);
+        exporter.process(argv.jsonlog);
     })
     .help().argv;

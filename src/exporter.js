@@ -37,7 +37,15 @@ function lazyInit(){
   };
 }
 
+let pendingSync;
+function insertRow(row){
+  pending.push(row);
+  pendingSync = pendingSync || setTimeout(commitChanges, 100);
+}
+
 function commitChanges(){
+  clearTimeout(pendingSync);
+  pendingSync = null;
   getTable = lazyInit();
   while(pending.length){
     let row = pending.shift();
@@ -46,6 +54,16 @@ function commitChanges(){
       if(err){
         console.error(err);
         console.log(`error on inserted row: ${JSON.stringify(row)}`);
+        // put it back onto the head of the queue and wait until next time
+        // if it is a recoverable error, otherwise drop it
+        if([5, 6, 9].indexOf(err.code) === -1){
+          pending.unshift(row);
+          // queue another push in 100ms
+          if(pendingSync){
+            clearTimeout(pendingSync);
+          }
+          setTimeout(commitChanges, 100);
+        }
       } else {
         console.log(`api response: ${JSON.stringify(apiResponse)}`);
       }
@@ -53,8 +71,9 @@ function commitChanges(){
   }
 }
 
-
-function mount(filename){
+let mountedFilename;
+function process(filename){
+  mountedFilename = filename;
   console.log('mounting exporter...');
   const rs = fs.createReadStream(filename);
   rs.on('data', function read(buf){
@@ -91,4 +110,4 @@ function mount(filename){
   });
 }
 
-module.exports = {mount};
+module.exports = {process, commitChanges, insertRow};
