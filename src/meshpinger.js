@@ -48,6 +48,7 @@ function getDnsNameFromVm(vm) {
 function createLogsCallback(tsvOutput, jsonOutput) {
     const outputStream = fs.createWriteStream(tsvOutput, {flags: 'a'});
     const jsonStream = fs.createWriteStream(jsonOutput, {flags: 'a'});
+    exporter.mount(jsonOutput);
     return function (src_timestamp, event_name, remote_hostname, remote_timestamp, count, ...rest) {
         for (var i = 0; i < arguments.length; i++) {
             outputStream.write('' + arguments[i]);
@@ -84,14 +85,15 @@ function createLogsCallback(tsvOutput, jsonOutput) {
             break;
           case 'send-failed':
             obj.count = rest[0];
-            obj.packetTime = count;
+            obj.src_hostname = localHostname;
+            delete obj.remote_timestamp;
             break;
-
+          default:
+            // don't log unknown events
+            return;
         }
-        jsonStream.write(JSON.stringify(obj));
-        jsonStream.write('\n');
+        jsonStream.write(JSON.stringify(obj) + '\n');
     };
-    exporter.mount(jsonOutput);
 }
 
 function runUdpServerSocket(port, epoch, writeLog) {
