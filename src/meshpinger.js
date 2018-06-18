@@ -55,7 +55,7 @@ function createLogsCallback(tsvOutput, jsonOutput) {
         }
         outputStream.write('\n');
         const obj = {src_timestamp, event_name, remote_hostname, remote_timestamp, count};
-        switch(recordType){
+        switch(event_name){
           case 'reset':
             obj.epoch = rest[0];
             break;
@@ -88,7 +88,7 @@ function createLogsCallback(tsvOutput, jsonOutput) {
             break;
 
         }
-        jsonStream.write(JSON.stringify());
+        jsonStream.write(JSON.stringify(obj));
         jsonStream.write('\n');
     };
     exporter.mount(jsonOutput);
