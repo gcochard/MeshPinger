@@ -28,6 +28,7 @@ const exporter = require('./exporter.js');
 let projectId = compute.authClient.projectId;
 let port = 25000;
 let endpoints = [];
+
 function enumerateHosts(cb) {
     return enumerateHostsWithSDK(function(err, hosts){
         if(err){ return cb(err); }
@@ -35,12 +36,14 @@ function enumerateHosts(cb) {
         return cb(null, hosts.map( host => getDnsNameFromVm(host) ));
     });
 }
+
 function enumerateHostsWithSDK(cb) {
-    compute.getVMs({filter: 'name eq ^mesh.*$'}, function(err, vms){
+    compute.getVMs({filter: 'labels.node-type eq mesh-ping'}, function(err, vms){
         if(err){ return cb(err); }
         return cb(null, vms);
     });
 }
+
 function getDnsNameFromVm(vm) {
     return `${vm.name}.${vm.zone.name}.c.${projectId}.internal:${port}`;
 }
@@ -269,6 +272,14 @@ function runPinger(endpoint, interval, writeLog) {
 
 yargs
     .usage('$0 <cmd> [args]')
+    .command('enumerate', 'enumerate endpoints', {}, function(argv) {
+        enumerateHosts((err,hosts) => {
+          if(err){
+            return console.error(err);
+          }
+          console.log(hosts);
+        });
+    })
     .command('mesh-ping [port] [endpoints] [log]', 'Ping end points', {
         endpoints: {
             default: 'endpoints.list'
@@ -287,20 +298,8 @@ yargs
         },
         jsonlog: {
             default: 'pinger.json'
-        },
-        enumerate: {
-            default: false
         }
     }, function (argv) {
-        if(argv.enumerate){
-                enumerateHosts((err,hosts) => {
-                        console.log(hosts);
-                });
-                enumerateHostsWithSDK((err,hosts) => {
-                        console.log(hosts);
-                });
-                return;
-        }
         port = argv.port;
         const logCallback = createLogsCallback(argv.log, argv.jsonlog);
         if(fs.existsSync(argv.endpoints)){

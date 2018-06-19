@@ -76,11 +76,10 @@ function process(filename){
   mountedFilename = filename;
   console.log('mounting exporter...');
   let rs;
-  try {
-    rs = fs.createReadStream(filename);
-  } catch (e){
+  if(!fs.existsSync(filename)){
     return setTimeout(() => process(filename), 100);
   }
+  rs = fs.createReadStream(filename);
   rs.on('data', function read(buf){
     console.log(`change read: ${buf.toString()}`);
     const str = last + buf.toString();
