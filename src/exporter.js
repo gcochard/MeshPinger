@@ -75,7 +75,12 @@ let mountedFilename;
 function process(filename){
   mountedFilename = filename;
   console.log('mounting exporter...');
-  const rs = fs.createReadStream(filename);
+  let rs;
+  try {
+    rs = fs.createReadStream(filename);
+  } catch (e){
+    return setTimeout(() => process(filename), 100);
+  }
   rs.on('data', function read(buf){
     console.log(`change read: ${buf.toString()}`);
     const str = last + buf.toString();
