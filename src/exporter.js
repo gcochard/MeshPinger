@@ -21,7 +21,7 @@ function leftPad(str, pad, len){
   return str;
 }
 
-function lazyInit(){
+const getTable = (function lazyInit(){
   const Spanner = require('@google-cloud/spanner');
   const spanner = new Spanner();
 
@@ -35,7 +35,7 @@ function lazyInit(){
   return function(){
     return logTable;
   };
-}
+}());
 
 let pendingSync;
 function insertRow(row){
@@ -46,7 +46,6 @@ function insertRow(row){
 function commitChanges(){
   clearTimeout(pendingSync);
   pendingSync = null;
-  getTable = lazyInit();
   while(pending.length){
     let row = pending.shift();
     row.rev_timestamp = leftPad(reverse(new Date(row.src_timestamp).getTime()), '0', 13);
