@@ -48,6 +48,15 @@ function commitChanges(){
   pendingSync = null;
   while(pending.length){
     let row = pending.shift();
+    let retries = row.retries || 0;
+    if(row.retries > 5){
+      // this is an unrecoverable error
+      console.error('Error inserting row after 5 tries, giving up');
+      continue;
+    }
+    if(row.retries){
+      delete row.retries;
+    }
     row.rev_timestamp = leftPad(reverse(new Date(row.src_timestamp).getTime()), '0', 13);
     getTable().insert(row).then(apiResponse => {
       console.log(`api response: ${JSON.stringify(apiResponse)}`);
@@ -56,16 +65,17 @@ function commitChanges(){
       console.log(`error on inserted row: ${JSON.stringify(row)}`);
       // put it back onto the head of the queue and wait until next time
       // if it is a recoverable error, otherwise drop it
-      if([5, 6, 8, 9].indexOf(err.code) === -1 || !/not classified as transient/.test(err.note)){
+      if([5, 6, 8, 9].indexOf(err.code) !== -1 && /not classified as transient/.test(err.note) && /Value of type [^ ]+ not recognized\./.test(err.message)){
+        console.log('dropping insert due to unrecoverable error');
+      } else {
         console.log('retrying insert');
         pending.unshift(row);
+        row.retries = retries + 1;
         // queue another push in 100ms
         if(pendingSync){
           clearTimeout(pendingSync);
         }
         setTimeout(commitChanges, 100);
-      } else {
-        console.log('dropping insert due to unrecoverable error');
       }
     });
   }
