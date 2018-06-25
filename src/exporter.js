@@ -50,22 +50,23 @@ function commitChanges(){
   while(pending.length){
     let row = pending.shift();
     row.rev_timestamp = leftPad(reverse(new Date(row.src_timestamp).getTime()), '0', 13);
-    getTable().insert(row, function(err, apiResponse){
-      if(err){
-        console.error(err);
-        console.log(`error on inserted row: ${JSON.stringify(row)}`);
-        // put it back onto the head of the queue and wait until next time
-        // if it is a recoverable error, otherwise drop it
-        if([5, 6, 9].indexOf(err.code) === -1){
-          pending.unshift(row);
-          // queue another push in 100ms
-          if(pendingSync){
-            clearTimeout(pendingSync);
-          }
-          setTimeout(commitChanges, 100);
+    getTable().insert(row).then(apiResponse => {
+      console.log(`api response: ${JSON.stringify(apiResponse)}`);
+    }).catch(err => {
+      console.error(err);
+      console.log(`error on inserted row: ${JSON.stringify(row)}`);
+      // put it back onto the head of the queue and wait until next time
+      // if it is a recoverable error, otherwise drop it
+      if([5, 6, 8, 9].indexOf(err.code) === -1 || !/not classified as transient/.test(err.note)){
+        console.log('retrying insert');
+        pending.unshift(row);
+        // queue another push in 100ms
+        if(pendingSync){
+          clearTimeout(pendingSync);
         }
+        setTimeout(commitChanges, 100);
       } else {
-        console.log(`api response: ${JSON.stringify(apiResponse)}`);
+        console.log('dropping insert due to unrecoverable error');
       }
     });
   }
@@ -74,11 +75,12 @@ function commitChanges(){
 let mountedFilename;
 function process(filename){
   mountedFilename = filename;
-  console.log('mounting exporter...');
   let rs;
   if(!fs.existsSync(filename)){
+    console.log(`${filename} does not exist, deferring`);
     return setTimeout(() => process(filename), 100);
   }
+  console.log('mounting exporter...');
   rs = fs.createReadStream(filename);
   rs.on('data', function read(buf){
     console.log(`change read: ${buf.toString()}`);
