@@ -72,12 +72,12 @@ function commitChanges(){
 }
 
 let mountedFilename;
-function process(filename){
+function processFile(filename){
   mountedFilename = filename;
   let rs;
   if(!fs.existsSync(filename)){
     console.log(`${filename} does not exist, deferring`);
-    return setTimeout(() => process(filename), 100);
+    return setTimeout(() => processFile(filename), 100);
   }
   console.log('mounting exporter...');
   rs = fs.createReadStream(filename);
@@ -115,4 +115,4 @@ function process(filename){
   });
 }
 
-module.exports = {process, commitChanges, insertRow};
+module.exports = {process: processFile, commitChanges, insertRow};
