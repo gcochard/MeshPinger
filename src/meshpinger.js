@@ -25,6 +25,7 @@ const moment = require('moment');
 const localHostname = os.hostname();
 const server = require('./server.js');
 const exporter = require('./exporter.js');
+const {auth} = require('google-auth-library');
 let projectId = compute.authClient.projectId;
 let port = 25000;
 let endpoints = [];
@@ -42,6 +43,26 @@ function enumerateHostsWithSDK(cb) {
         if(err){ return cb(err); }
         return cb(null, vms);
     });
+}
+
+function removeLabels(instance, cb) {
+    auth.getClient({scopes: 'https://www.oogleapis.com/auth/cloud-platform'}).then(client => {
+        let url = instance.metadata.selfLink;
+        client.request({url}).
+        then(response => response.data.labelFingerprint).
+        then(labelFingerprint => {
+            client.request({url: url+'/setLabels', method: 'POST', data: {labels: "", labelFingerprint}})
+            .then(res => cb(null, res))
+            .catch(err => {
+                console.error(err);
+                cb(err);
+            });
+        }).
+        catch(err => {
+            console.error(err);
+            cb(err);
+        });
+    })
 }
 
 function getDnsNameFromVm(vm) {
@@ -313,8 +334,23 @@ yargs
             enumerateHosts((err, hosts) => {
                 // swallow failures
                 if(err){ return console.error(err); }
+                let oldEndpoints = new Set(endpoints);
                 endpoints = hosts;
+                let newEndpoints = new Set(endpoints);
+                let difference = new Set([...oldEndpoints].filter(x => !newEndpoints.has(x)));
+                if(difference.size){
+                    endPings(difference);
+                }
                 startPingsOnce();
+            });
+        }
+
+        function endPings(hosts) {
+            hosts.forEach(endpoint => {
+                if(pingSessions[endpoint]){
+                    clearInterval(pingSessions[endpoint]);
+                    delete pingSessions[endpoint];
+                }
             });
         }
 
@@ -326,11 +362,35 @@ yargs
             });
         }
 
+        function stopPings() {
+            Object.keys(pingSessions).forEach(function(session){
+                clearInterval(pingSessions[session]);
+            });
+        }
+
         reEnumerate();
 
         // re-enumerate hosts every minute
         setInterval(reEnumerate, 60 * 1000);
         server.mount(pingSessions);
+        process.on('SIGTERM', function(){
+            // before exit, cancel all pinger sessions and remove the label for
+            // this host, so other hosts stop pinging as well
+            stopPings();
+            compute.getVMs({filter: `name eq ${localHostname}`}, function(err, vms){
+                if(err){
+                    console.error(err);
+                    process.exit();
+                }
+                removeLabels(vms[0], function(err, data){
+                    if(err){
+                      console.error(err);
+                    }
+                    console.log(data);
+                    process.exit();
+                });
+            });
+        });
     })
     .command('exporter [jsonlog]', 'Watch the json log and epxort it to spanner', {
         jsonlog: {
